@@ -10,50 +10,57 @@
 
 set -euo pipefail
 
+# 统一以仓库根目录为基准，脚本从任何 cwd 调用都得到一致结果
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+cd "$REPO_ROOT"
+
 DESKTOP="${DESKTOP:-xfce}"
 UPSTREAM_TAG="${UPSTREAM_TAG:-v1.1.0}"
 UPSTREAM_REPO="${UPSTREAM_REPO:-Cateners/tiny_container}"
 BASE_URL="https://github.com/${UPSTREAM_REPO}/releases/download/${UPSTREAM_TAG}"
 PART_SIZE=$((98 * 1024 * 1024))       # 与 build.ps1 的 98MB 对齐
 
-JNI_DIR="android/app/src/main/jniLibs/arm64-v8a"
-ASSETS_DIR="assets"
+JNI_DIR="$REPO_ROOT/android/app/src/main/jniLibs/arm64-v8a"
+ASSETS_DIR_ABS="$REPO_ROOT/assets"
 DOWNLOADS="${RUNNER_TEMP:-/tmp}/tc-inputs"
 
 log() { printf '\n==> %s\n' "$*"; }
 
 # ---------- 工具函数 ----------
 # 分片计数与列举统一走这两个函数，避免各处 glob 写法不一致。
-# 注意：必须用 find -regex 而不是 shell 的 xa[a-z]，
-# 因为 shell glob 未展开时会原样传参（历史上这里踩过坑）。
+# 注意两点：
+#   1. 必须用 find -regex 而不是 shell 的 xa[a-z]：shell glob 未展开时会原样传参；
+#   2. 必须用绝对路径 $ASSETS_DIR_ABS：本函数会被 subshell 在别的 cwd 下调到
+#      （例如 gen_manifest 里先 cd 再调用），相对路径会解析成 assets/assets 而查不到文件。
+
 shard_list() {
-  find "$ASSETS_DIR" -maxdepth 1 -type f -regextype posix-extended \
+  find "$ASSETS_DIR_ABS" -maxdepth 1 -type f -regextype posix-extended \
        -regex '.*/xa[a-z]$' -printf '%f\n' 2>/dev/null | sort
 }
 shard_count() { shard_list | wc -l | tr -d ' '; }
 
 split_rootfs() {
   local src="$1"
-  log "分割 $(basename "$src") -> ${ASSETS_DIR}/xa*（每片 98MB）"
+  log "分割 $(basename "$src") -> $ASSETS_DIR_ABS/xa*（每片 98MB）"
 
   # 清理旧分片：逐个删除，不要写 'xa[a-z]' 这种可能不被展开的字面量
   local old
   while IFS= read -r old; do
-    [ -n "$old" ] && rm -f "$ASSETS_DIR/$old"
-  done < <(find "$ASSETS_DIR" -maxdepth 1 -type f \( -name 'xa*' \) -printf '%f\n' 2>/dev/null)
-  rm -f "$ASSETS_DIR/xa.sha256"
+    [ -n "$old" ] && rm -f "$ASSETS_DIR_ABS/$old"
+  done < <(find "$ASSETS_DIR_ABS" -maxdepth 1 -type f -name 'xa*' -printf '%f\n' 2>/dev/null)
+  rm -f "$ASSETS_DIR_ABS/xa.sha256"
 
   # ⚠️ split 的前缀只能写到 "x"。
   # GNU split 会自己在前缀后面补两位后缀 aa, ab, ... az, ba, ...
   #   前缀 assets/x   -> xaa, xab, ... xaz   ✅ App 端就是这个命名
   #   前缀 assets/xa  -> xaaa, xaab, ...      ❌ 多了一个 a（CI 上就是这么挂的）
-  split -b "${PART_SIZE}" "$src" "${ASSETS_DIR}/x"
+  split -b "${PART_SIZE}" "$src" "${ASSETS_DIR_ABS}/x"
 
   local n
   n=$(shard_count)
   if [ "$n" -eq 0 ]; then
     echo "错误：split 没有产出任何分片，输出目录内容：" >&2
-    ls -la "$ASSETS_DIR" >&2
+    ls -la "$ASSETS_DIR_ABS" >&2
     exit 1
   fi
   if [ "$n" -gt 26 ]; then
@@ -67,35 +74,38 @@ split_rootfs() {
 gen_manifest() {
   log "生成分片校验清单 assets/xa.sha256"
   local list
-  list=$(cd "$ASSETS_DIR" && shard_list)
+  # shard_list 返回的是 basename 列表，供 sha256sum 在 assets 目录内使用
+  list=$(shard_list | tr '\n' ' ')
+  list=${list% }
   if [ -z "$list" ]; then
     echo "错误：没有可校验的分片，无法生成清单" >&2
     exit 1
   fi
-  ( cd "$ASSETS_DIR" && sha256sum $list > xa.sha256 )
+  ( cd "$ASSETS_DIR_ABS" && sha256sum $list > xa.sha256 )
   local lines
-  lines=$(wc -l < "$ASSETS_DIR/xa.sha256" | tr -d ' ')
-  log "清单条目数：$lines"
+  lines=$(wc -l < "$ASSETS_DIR_ABS/xa.sha256" | tr -d ' ')
+  log "清单条目数：$lines（分片数 $(shard_count)）"
   if [ "$lines" -ne "$(shard_count)" ]; then
     echo "错误：清单条目数 $lines 与分片数 $(shard_count) 不一致" >&2
+    cat "$ASSETS_DIR_ABS/xa.sha256" >&2
     exit 1
   fi
 }
 
 # ---------- 1. rootfs 分片 ----------
-mkdir -p "$ASSETS_DIR"
+mkdir -p "$ASSETS_DIR_ABS"
 COUNT=$(shard_count)
 if [ "$COUNT" -ge 2 ]; then
   log "仓库内已有 $COUNT 个 rootfs 分片，跳过下载"
-  if [ ! -f "$ASSETS_DIR/xa.sha256" ]; then
+  if [ ! -f "$ASSETS_DIR_ABS/xa.sha256" ]; then
     gen_manifest
   else
     log "校验已有分片"
-    ( cd "$ASSETS_DIR" && sha256sum -c xa.sha256 )
+    ( cd "$ASSETS_DIR_ABS" && sha256sum -c xa.sha256 )
   fi
 else
   echo "仓库内没有 rootfs 分片（找到 $COUNT 个），开始从上游下载"
-  mkdir -p "$DOWNLOADS" "$ASSETS_DIR"
+  mkdir -p "$DOWNLOADS" "$ASSETS_DIR_ABS"
   SRC="$DOWNLOADS/debian-${DESKTOP}.tar.xz"
   URL="${BASE_URL}/debian-${DESKTOP}.tar.xz"
 
@@ -146,29 +156,29 @@ else
 fi
 
 # ---------- 3. patch.tar.gz ----------
-if [ -f "$ASSETS_DIR/patch.tar.gz" ]; then
-  log "仓库内已有 assets/patch.tar.gz（$(du -h "$ASSETS_DIR/patch.tar.gz" | cut -f1)），跳过下载"
+if [ -f "$ASSETS_DIR_ABS/patch.tar.gz" ]; then
+  log "仓库内已有 assets/patch.tar.gz（$(du -h "$ASSETS_DIR_ABS/patch.tar.gz" | cut -f1)），跳过下载"
 else
   log "下载 patch.tar.gz"
   mkdir -p "$DOWNLOADS"
   ok=0
   for attempt in 1 2 3; do
-    if curl -fL --retry 3 --retry-delay 5 -C - -o "$ASSETS_DIR/patch.tar.gz" \
+    if curl -fL --retry 3 --retry-delay 5 -C - -o "$ASSETS_DIR_ABS/patch.tar.gz" \
          "${BASE_URL}/patch.tar.gz"; then ok=1; break; fi
     echo "第 $attempt 次下载失败，重试…"
     sleep 5
   done
   if [ "$ok" -ne 1 ] && command -v gh >/dev/null 2>&1; then
-    gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p 'patch.tar.gz' -D "$ASSETS_DIR" && ok=1
+    gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p 'patch.tar.gz' -D "$ASSETS_DIR_ABS" && ok=1
   fi
   [ "$ok" -eq 1 ] || { echo "错误：patch.tar.gz 下载失败" >&2; exit 1; }
-  ls -lh "$ASSETS_DIR/patch.tar.gz"
+  ls -lh "$ASSETS_DIR_ABS/patch.tar.gz"
 fi
 
 # ---------- 4. 汇总 ----------
 log "构建输入清单"
 printf '  %-46s %s\n' "jniLibs:        $(ls -A "$JNI_DIR" | wc -l) 个文件" ""
-printf '  %-46s %s\n' "patch.tar.gz:   $(du -h "$ASSETS_DIR/patch.tar.gz" | cut -f1)" ""
-printf '  %-46s %s\n' "rootfs 分片:    $(ls -A "$ASSETS_DIR" | grep -cE '^xa[a-z]+$') 个" ""
-du -sh "$ASSETS_DIR"
+printf '  %-46s %s\n' "patch.tar.gz:   $(du -h "$ASSETS_DIR_ABS/patch.tar.gz" | cut -f1)" ""
+printf '  %-46s %s\n' "rootfs 分片:    $(ls -A "$ASSETS_DIR_ABS" | grep -cE '^xa[a-z]+$') 个" ""
+du -sh "$ASSETS_DIR_ABS"
 df -h / | tail -1
