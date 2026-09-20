@@ -8,7 +8,24 @@
 
 ---
 
-## 未发布
+## 1.1.2
+
+> 稳定性与工程化增强版本：优化 CI 依赖缓存、修复 Wine 符号字体映射与脚本退出码、精简 Android 构建。
+> **支持覆盖安装**，与 1.1.1 签名保持一致，容器数据完整保留。
+
+### ⚡ 构建与 CI 缓存优化
+- GitHub Actions 增加上游原料缓存（`actions/cache@v4`），自动缓存 rootfs、jniLibs 与 patch 包，大幅提升后续构建速度并规避外部下载波动。
+- Android 打包添加 `androidResources.noCompress`，防止 aapt2 对已压缩的 rootfs 分片及归档重复压缩，显著缩短 APK 组包耗时。
+- `android/app/build.gradle` 卫生优化：关闭 debug 编译阶段的代码混淆（`minifyEnabled false`），禁用未使用的 `aidl` 与 `dataBinding` 特性。
+
+### 🐛 修复 Wine 图标与特殊符号变方块乱码
+- `extra/cross/chn_fonts.reg`：剔除对 `Marlett`、`Wingdings`、`Webdings`、`Segoe MDL2 Assets` 等 13 种符号/图标字体的中文字体强制映射，修复 Wine 桌面窗口按钮（最小化/最大化/关闭）及应用特殊图标显示为方块/乱码的问题。
+
+### 🛡️ 脚本健壮化与系统安全加固
+- `extra/cross/install-hangover*`：启用 `set -euo pipefail`，修复下载镜像全部失败分支裸 `exit` 导致返回码为 0（误报成功）的问题，保证安装异常能被正确捕获与上报。
+- `AndroidManifest.xml`：添加 `android:allowBackup="false"`，防止应用与容器私有数据通过 ADB 备份导出泄漏；收敛内部页面 `Signal9Activity` 的 `android:exported="false"`。
+
+---
 
 ### 🐛 首启安装不再中途“假成功”
 - 安装脚本加 `set -e`，每一步都检查退出码。以前任何一步失败都会被下一句覆盖，

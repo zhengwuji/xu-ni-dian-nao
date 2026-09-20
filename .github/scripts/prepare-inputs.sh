@@ -109,18 +109,22 @@ else
   SRC="$DOWNLOADS/debian-${DESKTOP}.tar.xz"
   URL="${BASE_URL}/debian-${DESKTOP}.tar.xz"
 
-  log "下载 $URL"
-  ok=0
-  for attempt in 1 2 3; do
-    if curl -fL --retry 3 --retry-delay 5 -C - -o "$SRC" "$URL"; then ok=1; break; fi
-    echo "第 $attempt 次下载失败，重试…"
-    sleep 5
-  done
-  if [ "$ok" -ne 1 ] && command -v gh >/dev/null 2>&1; then
-    log "curl 失败，改用 gh release download"
-    gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p "debian-${DESKTOP}.tar.xz" -D "$DOWNLOADS" && ok=1
+  if [ -s "$SRC" ]; then
+    log "命中本地/缓存的 rootfs: $SRC ($(du -h "$SRC" | cut -f1))，跳过下载"
+  else
+    log "下载 $URL"
+    ok=0
+    for attempt in 1 2 3; do
+      if curl -fL --retry 3 --retry-delay 5 -C - -o "$SRC" "$URL"; then ok=1; break; fi
+      echo "第 $attempt 次下载失败，重试…"
+      sleep 5
+    done
+    if [ "$ok" -ne 1 ] && command -v gh >/dev/null 2>&1; then
+      log "curl 失败，改用 gh release download"
+      gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p "debian-${DESKTOP}.tar.xz" -D "$DOWNLOADS" && ok=1
+    fi
+    [ "$ok" -eq 1 ] || { echo "错误：rootfs 下载失败" >&2; exit 1; }
   fi
-  [ "$ok" -eq 1 ] || { echo "错误：rootfs 下载失败" >&2; exit 1; }
 
   ls -lh "$SRC"
   split_rootfs "$SRC"
@@ -131,20 +135,24 @@ fi
 if [ -d "$JNI_DIR" ] && [ "$(ls -A "$JNI_DIR" 2>/dev/null | wc -l)" -gt 0 ]; then
   log "仓库内已有 jniLibs（$(ls -A "$JNI_DIR" | wc -l) 个文件），跳过下载"
 else
-  log "下载 jniLibs.zip"
   mkdir -p "$DOWNLOADS"
   ZIP="$DOWNLOADS/jniLibs.zip"
   URL="${BASE_URL}/jniLibs.zip"
-  ok=0
-  for attempt in 1 2 3; do
-    if curl -fL --retry 3 --retry-delay 5 -C - -o "$ZIP" "$URL"; then ok=1; break; fi
-    echo "第 $attempt 次下载失败，重试…"
-    sleep 5
-  done
-  if [ "$ok" -ne 1 ] && command -v gh >/dev/null 2>&1; then
-    gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p 'jniLibs.zip' -D "$DOWNLOADS" && ok=1
+  if [ -s "$ZIP" ]; then
+    log "命中本地/缓存的 jniLibs: $ZIP，跳过下载"
+  else
+    log "下载 jniLibs.zip"
+    ok=0
+    for attempt in 1 2 3; do
+      if curl -fL --retry 3 --retry-delay 5 -C - -o "$ZIP" "$URL"; then ok=1; break; fi
+      echo "第 $attempt 次下载失败，重试…"
+      sleep 5
+    done
+    if [ "$ok" -ne 1 ] && command -v gh >/dev/null 2>&1; then
+      gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p 'jniLibs.zip' -D "$DOWNLOADS" && ok=1
+    fi
+    [ "$ok" -eq 1 ] || { echo "错误：jniLibs 下载失败" >&2; exit 1; }
   fi
-  [ "$ok" -eq 1 ] || { echo "错误：jniLibs 下载失败" >&2; exit 1; }
 
   mkdir -p "$JNI_DIR"
   unzip -o -q "$ZIP" -d "$JNI_DIR"
@@ -158,6 +166,10 @@ fi
 # ---------- 3. patch.tar.gz ----------
 if [ -f "$ASSETS_DIR_ABS/patch.tar.gz" ]; then
   log "仓库内已有 assets/patch.tar.gz（$(du -h "$ASSETS_DIR_ABS/patch.tar.gz" | cut -f1)），跳过下载"
+  [ -d "$DOWNLOADS" ] && cp -f "$ASSETS_DIR_ABS/patch.tar.gz" "$DOWNLOADS/patch.tar.gz" 2>/dev/null || true
+elif [ -s "$DOWNLOADS/patch.tar.gz" ]; then
+  log "命中本地/缓存的 patch.tar.gz，复制到 assets/"
+  cp -f "$DOWNLOADS/patch.tar.gz" "$ASSETS_DIR_ABS/patch.tar.gz"
 else
   log "下载 patch.tar.gz"
   mkdir -p "$DOWNLOADS"
@@ -172,6 +184,7 @@ else
     gh release download "$UPSTREAM_TAG" -R "$UPSTREAM_REPO" -p 'patch.tar.gz' -D "$ASSETS_DIR_ABS" && ok=1
   fi
   [ "$ok" -eq 1 ] || { echo "错误：patch.tar.gz 下载失败" >&2; exit 1; }
+  cp -f "$ASSETS_DIR_ABS/patch.tar.gz" "$DOWNLOADS/patch.tar.gz" 2>/dev/null || true
   ls -lh "$ASSETS_DIR_ABS/patch.tar.gz"
 fi
 

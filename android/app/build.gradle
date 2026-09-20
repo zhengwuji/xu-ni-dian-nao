@@ -106,7 +106,7 @@ android {
         }
         debug {
             signingConfig signingConfigs.debug
-            minifyEnabled true
+            minifyEnabled false
             shrinkResources false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -120,19 +120,18 @@ android {
     }
 
     buildFeatures {
-        aidl true
-        dataBinding true
+        aidl false
+        dataBinding false
         viewBinding true
         buildConfig true
     }
-    
+
+    androidResources {
+        noCompress 'xz', 'gz', 'sha256', 'zip', 'tar', ''
+    }
 
     lint {
         disable "NullSafeMutableLiveData"
-    }
-
-    lintOptions {
-        //checkReleaseBuilds false
         abortOnError false
     }
     externalNativeBuild {

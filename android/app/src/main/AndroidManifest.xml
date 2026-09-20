@@ -11,6 +11,7 @@
         android:label="@string/tc_app_name"
         android:name=".MainApplication"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
         android:usesCleartextTraffic="true"
         android:launchMode="singleInstance"
         android:theme="@style/App.Theme"
@@ -38,7 +39,7 @@
         </activity>
         <activity
             android:name=".Signal9Activity"
-            android:exported="true"
+            android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
         <provider
             android:name="com.example.tiny_computer.filepicker.TinyDocumentsProvider"

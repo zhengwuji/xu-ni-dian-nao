@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 echo "正在更新软件包..."
 sudo apt update
@@ -20,26 +21,27 @@ mirror_sites=(
 mkdir -p /tmp/hangover
 cd /tmp/hangover
 
+download_ok=0
 for mirror in "${mirror_sites[@]}"; do
     url="${mirror}${hangover_url}"
     echo "尝试从 $url 下载Hangover..."
-    wget "${url}" -O hangover.tar
-    if [ $? -eq 0 ]; then
+    if wget "${url}" -O hangover.tar; then
         echo "成功下载Hangover"
+        download_ok=1
         break
-    fi
-    if [ -z "$mirror" ]; then
-        cd /tmp
-        rm -rf /tmp/hangover
-        echo "下载失败...退出安装..."
-        exit
     fi
 done
 
+if [ "$download_ok" -ne 1 ]; then
+    cd /tmp
+    rm -rf /tmp/hangover
+    echo "下载失败...退出安装..."
+    exit 1
+fi
+
 echo "正在安装Hangover..."
 tar xvf hangover.tar
-sudo apt install -y ./hangover*.deb
-if [ $? -ne 0 ]; then
+if ! sudo apt install -y ./hangover*.deb; then
     cd /tmp
     rm -rf /tmp/hangover
     echo "安装失败...退出安装..."

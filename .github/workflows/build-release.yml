@@ -91,6 +91,12 @@ jobs:
           flutter --version
           dart --version
 
+      - name: 缓存上游构建原料 (rootfs / jniLibs / patch)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tc-inputs
+          key: tc-inputs-${{ env.UPSTREAM_REPO }}-${{ env.UPSTREAM_TAG }}-${{ env.DESKTOP }}
+
       - name: 准备构建输入
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
