@@ -164,7 +164,11 @@ android {
             requiredRepoFiles.each { rel ->
                 if (!rootProject.file("../${rel}").exists()) { missing << rel }
             }
-            def shards = rootProject.file("../assets")?.listFiles()?.findAll { it.name ==~ /xa[a-z]{1,2}/ } ?: []
+            // 分片名严格是 xaa..xaz（GNU split 默认命名）。
+            // 用全匹配 ==~ 的锚定形式，避免把 xa.sha256 之类也算进来。
+            def shards = rootProject.file("../assets")?.listFiles()?.findAll {
+                it.isFile() && it.name ==~ /xa[a-z]/
+            } ?: []
             if (shards.size() < 2) { missing << "assets/xa*（当前 ${shards.size()} 个分片）" }
             def soCount = jniDir.exists() ? (jniDir.listFiles()?.length ?: 0) : 0
             if (soCount == 0) { missing << "android/app/src/main/jniLibs/arm64-v8a/*（需从 Releases 下载 jniLibs.zip）" }

@@ -132,7 +132,7 @@ function Assert-BuildInputs {
         $missing += "android/app/src/main/jniLibs/arm64-v8a/*（见 README 构建说明，需从 Releases 下载 jniLibs.zip）"
     }
 
-    $shards = @(Get-ChildItem $AssetsDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^xa[a-z]{1,2}$' })
+    $shards = @(Get-ChildItem $AssetsDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^xa[a-z]$' })
     if ($shards.Count -lt 2) {
         $missing += "assets/xa*（rootfs 分片，当前 $($shards.Count) 个）"
     }
@@ -154,7 +154,7 @@ function Assert-BuildInputs {
 # -SkipBuild 时也要检查的项：只校验分片与清单，不要求 jniLibs / keystore 这些构建产物。
 # 这样 `build.ps1 xfce -SkipBuild` 可以单独用来“重刷分片 + 重算哈希”，不会因为缺 jniLibs 而失败。
 function Assert-ShardsOnly {
-    $shards = @(Get-ChildItem $AssetsDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^xa[a-z]{1,2}$' })
+    $shards = @(Get-ChildItem $AssetsDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^xa[a-z]$' })
     if ($shards.Count -lt 2) {
         throw "assets 下只有 $($shards.Count) 个 rootfs 分片，至少需要 2 个"
     }

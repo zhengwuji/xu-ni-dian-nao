@@ -32,6 +32,14 @@ SKIP_BUILD="${SKIP_BUILD:-0}"
 
 log() { printf '\n==> %s\n' "$*"; }
 
+# 分片列举统一走 find -regex：shell 的 xa[a-z] 在未展开时会原样传参，
+# 曾导致 sha256sum 收到空参数、清单只写出一行空校验和。
+shard_list() {
+  find "$ASSETS_DIR" -maxdepth 1 -type f -regextype posix-extended \
+       -regex '.*/xa[a-z]$' -printf '%f\n' 2>/dev/null | sort
+}
+shard_count() { shard_list | wc -l | tr -d ' '; }
+
 check_inputs() {
   local missing=()
   [ -f "assets/assets.zip" ]    || missing+=("assets/assets.zip")
@@ -41,7 +49,7 @@ check_inputs() {
     missing+=("android/app/src/main/jniLibs/arm64-v8a/*（需从 Releases 下载 jniLibs.zip）")
   fi
   local shards
-  shards=$(ls assets/xa[a-z] 2>/dev/null | wc -l)
+  shards=$(shard_count)
   [ "$shards" -ge 2 ] || missing+=("assets/xa*（rootfs 分片，当前 $shards 个）")
 
   if [ ${#missing[@]} -gt 0 ]; then
@@ -65,20 +73,35 @@ for DESKTOP in "${DESKTOP_ENVS[@]}"; do
   mkdir -p "$ASSETS_DIR"
   if [ -f "$SRC" ]; then
     log "分割 $TAR_FILE -> assets/xa*（每片 98MB）"
-    rm -f "$ASSETS_DIR"/xa[a-z] "$ASSETS_DIR"/xa.sha256
+    # 逐个删除旧分片，避免 用了未展开的 glob 字面量
+    while IFS= read -r old; do
+      [ -n "$old" ] && rm -f "$ASSETS_DIR/$old"
+    done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -name 'xa*' -printf '%f\n' 2>/dev/null)
+    rm -f "$ASSETS_DIR/xa.sha256"
+
+    # 用 GNU split 的默认命名 xaa..xaz（不要 -d / --numeric-suffixes）
     split -b "$PART_SIZE" "$SRC" "$ASSETS_DIR/xa"
-    PART_COUNT=$(ls "$ASSETS_DIR"/xa[a-z] | wc -l)
-    log "共 $PART_COUNT 个分片"
+    PART_COUNT=$(shard_count)
+    log "共 $PART_COUNT 个分片: $(shard_list | tr '\n' ' ')"
+    if [ "$PART_COUNT" -eq 0 ]; then
+      echo "错误：split 没有产出任何分片" >&2
+      exit 1
+    fi
     if [ "$PART_COUNT" -gt 26 ]; then
       echo "错误：分片数超过 26，命名会越过 xaa..xaz；App 端 lib/workflow.dart 的 'cat xa*'" >&2
       echo "      拼接依赖字典序，必须同步改成显式列表拼接，或调大分片长度。" >&2
       exit 1
     fi
     log "生成 assets/xa.sha256"
-    ( cd "$ASSETS_DIR" && sha256sum $(ls xa[a-z] | sort) > xa.sha256 )
+    ( cd "$ASSETS_DIR" && sha256sum $(shard_list) > xa.sha256 )
+    log "清单条目数：$(wc -l < "$ASSETS_DIR/xa.sha256" | tr -d ' ')"
   else
     log "找不到 $SRC，跳过切分（沿用 assets/ 下已有的分片）"
-    [ -f "$ASSETS_DIR/xa.sha256" ] || { ( cd "$ASSETS_DIR" && sha256sum $(ls xa[a-z] | sort) > xa.sha256 ); }
+    if [ ! -f "$ASSETS_DIR/xa.sha256" ]; then
+      [ "$(shard_count)" -ge 2 ] || { echo "错误：assets 下没有可用的分片" >&2; exit 1; }
+      ( cd "$ASSETS_DIR" && sha256sum $(shard_list) > xa.sha256 )
+      log "已补生成 assets/xa.sha256"
+    fi
   fi
 
   if [ "$SKIP_BUILD" = "1" ]; then

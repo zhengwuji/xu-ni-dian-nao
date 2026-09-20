@@ -23,38 +23,68 @@ DOWNLOADS="${RUNNER_TEMP:-/tmp}/tc-inputs"
 log() { printf '\n==> %s\n' "$*"; }
 
 # ---------- 工具函数 ----------
-have_shards() {
-  local n
-  n=$(find "$ASSETS_DIR" -maxdepth 1 -type f -regextype posix-extended \
-        -regex '.*/xa[a-z]{1,2}$' 2>/dev/null | wc -l)
-  echo "$n"
+# 分片计数与列举统一走这两个函数，避免各处 glob 写法不一致。
+# 注意：必须用 find -regex 而不是 shell 的 xa[a-z]，
+# 因为 shell glob 未展开时会原样传参（历史上这里踩过坑）。
+shard_list() {
+  find "$ASSETS_DIR" -maxdepth 1 -type f -regextype posix-extended \
+       -regex '.*/xa[a-z]$' -printf '%f\n' 2>/dev/null | sort
 }
+shard_count() { shard_list | wc -l | tr -d ' '; }
 
 split_rootfs() {
   local src="$1"
   log "分割 $(basename "$src") -> ${ASSETS_DIR}/xa*（每片 98MB）"
-  rm -f "$ASSETS_DIR"/xa[a-z] "$ASSETS_DIR"/xa.sha256
-  # GNU split 默认就是 xaa..xaz，与 App 端 `cat xa*` 的字典序拼接一致
-  split -b "${PART_SIZE}" -d --numeric-suffixes=0 --suffix-length=0 "$src" "${ASSETS_DIR}/xa" 2>/dev/null \
-    || split -b "${PART_SIZE}" "$src" "${ASSETS_DIR}/xa"
+
+  # 清理旧分片：逐个删除，不要写 'xa[a-z]' 这种可能不被展开的字面量
+  local old
+  while IFS= read -r old; do
+    [ -n "$old" ] && rm -f "$ASSETS_DIR/$old"
+  done < <(find "$ASSETS_DIR" -maxdepth 1 -type f \( -name 'xa*' \) -printf '%f\n' 2>/dev/null)
+  rm -f "$ASSETS_DIR/xa.sha256"
+
+  # ⚠️ 必须用 GNU split 的默认命名（xaa, xab, ... xaz）。
+  # 不要加 -d / --numeric-suffixes：那会生成 xa00, xa01…，
+  # 既不是 App 端期望的名字，也匹配不上 xa[a-z]，
+  # 会导致后面的 sha256sum 收到空参数、清单只剩一行空校验和。
+  split -b "${PART_SIZE}" "$src" "${ASSETS_DIR}/xa"
+
   local n
-  n=$(find "$ASSETS_DIR" -maxdepth 1 -type f -name 'xa*' ! -name '*.sha256' | wc -l)
+  n=$(shard_count)
+  if [ "$n" -eq 0 ]; then
+    echo "错误：split 没有产出任何分片，输出目录内容：" >&2
+    ls -la "$ASSETS_DIR" >&2
+    exit 1
+  fi
   if [ "$n" -gt 26 ]; then
     echo "错误：分片数 $n 超过 26，命名会越过 xaa..xaz，" >&2
     echo "      App 端 lib/workflow.dart 用的是 'cat xa*' 按字典序拼接，必须同步改。" >&2
     exit 1
   fi
-  log "共 $n 个分片"
+  log "共 $n 个分片: $(shard_list | tr '\n' ' ')"
 }
 
 gen_manifest() {
   log "生成分片校验清单 assets/xa.sha256"
-  ( cd "$ASSETS_DIR" && sha256sum $(ls xa[a-z] | sort) > xa.sha256 )
-  wc -l < "$ASSETS_DIR/xa.sha256" | xargs echo "清单条目数："
+  local list
+  list=$(cd "$ASSETS_DIR" && shard_list)
+  if [ -z "$list" ]; then
+    echo "错误：没有可校验的分片，无法生成清单" >&2
+    exit 1
+  fi
+  ( cd "$ASSETS_DIR" && sha256sum $list > xa.sha256 )
+  local lines
+  lines=$(wc -l < "$ASSETS_DIR/xa.sha256" | tr -d ' ')
+  log "清单条目数：$lines"
+  if [ "$lines" -ne "$(shard_count)" ]; then
+    echo "错误：清单条目数 $lines 与分片数 $(shard_count) 不一致" >&2
+    exit 1
+  fi
 }
 
 # ---------- 1. rootfs 分片 ----------
-COUNT=$(have_shards)
+mkdir -p "$ASSETS_DIR"
+COUNT=$(shard_count)
 if [ "$COUNT" -ge 2 ]; then
   log "仓库内已有 $COUNT 个 rootfs 分片，跳过下载"
   if [ ! -f "$ASSETS_DIR/xa.sha256" ]; then
