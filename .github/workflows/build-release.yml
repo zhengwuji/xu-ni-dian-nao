@@ -147,14 +147,38 @@ jobs:
         continue-on-error: true
         run: flutter test
 
+      - name: 计算版本号
+        id: ver
+        run: |
+          set -euo pipefail
+          VERSION=$(grep -E '^version:' pubspec.yaml | head -1 | sed -E 's/^version:[[:space:]]*//' | tr -d '\r')
+          NAME="${VERSION%%+*}"           # 1.1.1+20260920 -> 1.1.1
+          PUBSPEC_BUILD="${VERSION##*+}"  # 1.1.1+20260920 -> 20260920
+
+          # versionCode 必须严格递增，否则系统/安装器可能拒绝覆盖安装。
+          # 用「固定基数 + 工作流运行号」保证单调：基数取 30000000，
+          # 高于历史上任何一个用 pubspec 构建号（2026xxxx）发布过的版本，
+          # 又远低于 Android 上限 2100000000。
+          VERSION_CODE=$((30000000 + GITHUB_RUN_NUMBER))
+
+          echo "version_name=$NAME"            >> "$GITHUB_OUTPUT"
+          echo "pubspec_build=$PUBSPEC_BUILD"  >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE"    >> "$GITHUB_OUTPUT"
+          echo "版本名      : $NAME"
+          echo "pubspec构建号: $PUBSPEC_BUILD"
+          echo "versionCode : $VERSION_CODE  (= 30000000 + 运行号 $GITHUB_RUN_NUMBER)"
+
       - name: 编译 APK
         env:
           CURRENT_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
-          # --split-debug-info 每套桌面环境独立目录，避免符号表互相覆盖
+          # --build-number 让 Flutter 把 versionCode 写成我们算好的递增值
+          # （它会落到 local.properties 的 flutter.versionCode，Gradle 直接读取）
           flutter build apk \
             --release \
+            --build-name="${{ steps.ver.outputs.version_name }}" \
+            --build-number="${{ steps.ver.outputs.version_code }}" \
             --target-platform android-arm64 \
             --split-per-abi \
             --obfuscate \
@@ -170,9 +194,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          VERSION=$(grep -E '^version:' pubspec.yaml | head -1 | sed -E 's/^version:[[:space:]]*//' | tr -d '\r')
-          NAME="${VERSION%%+*}"          # 1.1.0+20260205 -> 1.1.0
-          BUILD="${VERSION##*+}"         # 20260205
+          # 版本信息统一来自「计算版本号」步骤，不在这里重复推导，避免两边不一致
+          NAME="${{ steps.ver.outputs.version_name }}"
+          BUILD="${{ steps.ver.outputs.version_code }}"
           APK_SRC="build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
           APK_NAME="tiny-computer-${DESKTOP}-${NAME}.apk"
           cp "$APK_SRC" "artifacts/$APK_NAME"
@@ -206,6 +230,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 配置了 keystore 就必须打出正式签名，否则脚本直接失败
           EXPECT_SIGNED: ${{ steps.signing.outputs.signed }}
+          # 与历史版本比较时，要求 versionCode 严格递增（保证覆盖安装可靠）
+          REQUIRE_VERSION_CODE_BUMP: 'true'
         run: |
           set -euo pipefail
           # 对比基准：本仓库上一个 Release 里的同桌面 APK

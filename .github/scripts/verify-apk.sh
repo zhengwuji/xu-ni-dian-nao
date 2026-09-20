@@ -169,7 +169,14 @@ if [ -n "$NEW_CODE" ] && [ -n "$OLD_CODE" ]; then
   if [ "$NEW_CODE" -gt "$OLD_CODE" ] 2>/dev/null; then
     echo "✅ versionCode 递增：$OLD_CODE → $NEW_CODE"
   elif [ "$NEW_CODE" -eq "$OLD_CODE" ] 2>/dev/null; then
-    echo "⚠️  versionCode 相同（$NEW_CODE）：可以覆盖安装，但部分安装器会拒绝，建议递增"
+    # 相同 versionCode 在多数设备上仍可覆盖安装，但部分 ROM / 第三方安装器会拒绝，
+    # 属于"不可靠的覆盖更新"。CI 里用 REQUIRE_VERSION_CODE_BUMP=true 把它升级成硬错误。
+    echo "⚠️  versionCode 相同（$NEW_CODE）：部分安装器会拒绝覆盖，建议递增"
+    if [ "${REQUIRE_VERSION_CODE_BUMP:-false}" = "true" ]; then
+      echo "错误：要求 versionCode 必须递增，但新旧同为 $NEW_CODE。" >&2
+      echo "  检查 workflow 是否传了 --build-number（应为 30000000 + run_number）。" >&2
+      FAIL=1
+    fi
   else
     echo "❌ versionCode 回退：$OLD_CODE → $NEW_CODE —— 系统会判定为降级安装并拒绝"
     FAIL=1
