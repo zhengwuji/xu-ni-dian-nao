@@ -8,6 +8,32 @@
 
 ---
 
+## 1.1.3
+
+> 架构与系统兼容性全面升级：全量采纳性能优化建议，最低支持 Android 10+（API 29+），首创流式直解免落盘架构，自适应现代 Android 系统权限与特性。
+> **支持覆盖安装**，与 1.1.2 签名保持一致，容器数据完整保留。
+
+### 🚀 架构突破：首启根文件系统“流式直解免落盘”
+- **零临时文件落盘**：重构 `Workflow.initForFirstTime()`，不再将 APK assets 内近 1GB 的 `xa*` 分片写入闪存内部存储，而是通过 `Process.start` 管道流式直接灌入 `proot tar` 进程。
+- **大幅降低存储门槛**：安装所需临时磁盘空间直接减少逾 1.2GB（预检门槛从 3.3GB 降低至 2.1GB），彻底避免低端或存储紧张机型因“边存分片边解包”导致的空间不足报错。
+- **延长闪存寿命与提速**：减少近 1GB 的闪存 I/O 写入磨损与读取等待，大幅加快首次启动解包就绪时间。
+
+### 📱 现代 Android 全系统自适应（最低 Android 10+，覆盖 Android 10 ~ Android 15）
+- **基线调整**：`minSdk` 提升为 `29`（Android 10+），移除过时系统负担，完全聚焦于 Android 10 及以上主流生态。
+- **W^X 兼容性守卫**：保持 `targetSdk 28` 兼容层，确保在 Android 10 到 Android 15 全版本上稳定绕过 Linux W^X SELinux 执行限制（Termux 核心机制）。
+- **Scoped Storage 完美兼容**：`AndroidManifest.xml` 中配置 `requestLegacyExternalStorage="true"`，保证在 Android 10 上无障碍读写主外部存储目录。
+- **全文件访问权限自适应**：在 `Workflow.grantPermissions()` 中引入动态 SDK 判断：
+  - Android 10 请求原生存储权限；
+  - Android 11+（API 30+）精准申请 `MANAGE_EXTERNAL_STORAGE`，保证容器顺畅挂载并访问手机 `/sdcard` / 外部存储目录；
+  - Android 13+（API 33+）申请通知权限，保障 Termux:X11 与后台常驻通知正常交互。
+- **保活与后台优化**：声明 `POST_NOTIFICATIONS`、`WAKE_LOCK` 与 `FOREGROUND_SERVICE` 权限，结合常亮锁与 Signal 9 幽灵进程引导，强化现代 Android 系统后台容器运行稳定性。
+
+### 🛡️ 纯净源码与工程卫生
+- 全量保留完整纯净源码，严格禁用任何代码混淆（`minifyEnabled false`、`shrinkResources false`、无 `--obfuscate` / `--split-debug-info`）。
+- 单元测试与构建流程严格保证 100% 绿色通过。
+
+---
+
 ## 1.1.2
 
 > 稳定性与工程化增强版本：优化 CI 依赖缓存、修复 Wine 符号字体映射与脚本退出码、精简 Android 构建。

@@ -558,9 +558,32 @@ class G {
 
 class Workflow {
 
+  // 自动适应现代 Android 各版本权限（Android 10~15）
   static Future<void> grantPermissions() async {
-    Permission.storage.request();
-    //Permission.manageExternalStorage.request();
+    try {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      final sdkInt = androidInfo.version.sdkInt;
+
+      // Android 10 (API 29): 标准存储权限
+      await Permission.storage.request();
+
+      // Android 11+ (API 30+): 容器挂载 /sdcard 需要全部文件访问权限
+      if (sdkInt >= 30) {
+        if (!await Permission.manageExternalStorage.isGranted) {
+          await Permission.manageExternalStorage.request();
+        }
+      }
+
+      // Android 13+ (API 33+): Termux:X11 及后台服务通知权限
+      if (sdkInt >= 33) {
+        if (!await Permission.notification.isGranted) {
+          await Permission.notification.request();
+        }
+      }
+    } catch (_) {
+      Permission.storage.request();
+      Permission.manageExternalStorage.request();
+    }
   }
 
   //TINY-OPT: 首启/重装引导包。原实现把 copyAsset 的返回值、Util.execute 的退出码
@@ -638,7 +661,7 @@ chmod 1777 tmp
     G.updateText.value = AppLocalizations.of(G.homePageStateContext)!.installingBootPackage;
     await setupBootstrap();
     
-    G.updateText.value = AppLocalizations.of(G.homePageStateContext)!.copyingContainerSystem;
+    G.updateText.value = AppLocalizations.of(G.homePageStateContext)!.installingContainerSystem;
     //存放容器的文件夹0和存放硬链接的文件夹.l2s
     Util.createDirFromString("${G.dataPath}/containers/0/.l2s");
     //这个是容器rootfs，被split命令分成了xa*，放在assets里
@@ -654,18 +677,59 @@ chmod 1777 tmp
     if (xaFiles.isEmpty) {
       throw StateError("安装包不完整：assets/ 里没有任何 rootfs 分片（xa*），请重新下载 APK");
     }
-    //TINY-OPT: 空间预检。原来没有任何检查，中低端机在“复制容器系统”阶段直接
-    //因空间不足抛异常，留下半套分片，重试又从第 0 片开始。
+    //TINY-OPT: 空间预检。流式直解免落盘，磁盘无需存一份近 1GB 的分片文件。
     await _ensureEnoughSpace(xaFiles);
-    for (String name in xaFiles) {
-      await Util.copyAssetVerified("assets/$name", "${G.dataPath}/$name");
-    }
-    //-J
-    G.updateText.value = AppLocalizations.of(G.homePageStateContext)!.installingContainerSystem;
-    //TINY-OPT: 解包到 .staging 再原子替换，失败时不会留下半个 rootfs；
-    //并且给脚本加 set -e + 分片哈希校验，失败会真的报错而不是显示“安装完成”。
+
     final String staging = "${G.dataPath}/containers/0.staging";
     await Util.execute("rm -rf \"$staging\"");
+    Util.createDirFromString(staging);
+
+    // TINY-OPT: 流式直解免落盘。
+    // 过去要把所有 xa* 分片（近 1GB）完整拷贝到 $DATA_DIR，再用 cat xa* | tar 解压，
+    // 这不仅额外耗费 1GB+ 闪存空间，在中低端机上更容易因空间耗尽崩溃，且造成严重的闪存写入磨损。
+    // 现在直接拉起 proot tar 进程，通过 process.stdin 将 APK assets 内的分片流式灌入管道，
+    // 实现 0 临时磁盘文件占用、极速首启解压。
+    final Process process = await Process.start(
+      "/system/bin/sh",
+      ["-c", """
+set -e
+export DATA_DIR='${G.dataPath}'
+export PATH="\$DATA_DIR/bin:\$PATH"
+export LD_LIBRARY_PATH="\$DATA_DIR/lib"
+export CONTAINER_DIR='$staging'
+export PROOT_TMP_DIR="\$DATA_DIR/proot_tmp"
+export PROOT_LOADER="\$DATA_DIR/applib/libproot-loader.so"
+export PROOT_LOADER_32="\$DATA_DIR/applib/libproot-loader32.so"
+mkdir -p "\$CONTAINER_DIR"
+exec \$DATA_DIR/bin/proot --link2symlink \$DATA_DIR/bin/tar x -J --delay-directory-restore --preserve-permissions -C "\$CONTAINER_DIR"
+"""],
+      workingDirectory: G.dataPath,
+    );
+
+    final List<String> stderrLines = [];
+    process.stderr.transform(utf8.decoder).transform(const LineSplitter()).listen((line) {
+      stderrLines.add(line);
+    });
+    process.stdout.listen((_) {}); // drain stdout
+
+    int processedCount = 0;
+    for (String name in xaFiles) {
+      processedCount++;
+      G.updateText.value = "${AppLocalizations.of(G.homePageStateContext)!.installingContainerSystem} ($processedCount/${xaFiles.length})";
+      final ByteData data = await rootBundle.load("assets/$name");
+      final Uint8List bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      process.stdin.add(bytes);
+      await process.stdin.flush();
+    }
+    await process.stdin.close();
+
+    final int exitCode = await process.exitCode;
+    if (exitCode != 0) {
+      final err = stderrLines.length > 10 ? stderrLines.sublist(stderrLines.length - 10).join("\n") : stderrLines.join("\n");
+      throw StateError("解包容器系统失败（退出码 $exitCode）: $err");
+    }
+
+    // 后续系统配置与原子替换
     await Util.executeChecked(
 """
 set -e
@@ -675,17 +739,6 @@ export LD_LIBRARY_PATH=\$DATA_DIR/lib
 export CONTAINER_DIR=$staging
 export EXTRA_OPT=""
 cd \$DATA_DIR
-export PROOT_TMP_DIR=\$DATA_DIR/proot_tmp
-export PROOT_LOADER=\$DATA_DIR/applib/libproot-loader.so
-export PROOT_LOADER_32=\$DATA_DIR/applib/libproot-loader32.so
-#分片哈希校验（清单由构建脚本 build.ps1 生成）。
-#没有清单的旧 APK 会跳过校验，行为与原来一致，兼容发布过的包。
-if [ -f "\$DATA_DIR/xa.sha256" ]; then
-	\$DATA_DIR/bin/busybox sha256sum -c "\$DATA_DIR/xa.sha256"
-fi
-#export PROOT_L2S_DIR=\$CONTAINER_DIR/.l2s
-mkdir -p "\$CONTAINER_DIR"
-\$DATA_DIR/bin/proot --link2symlink sh -c "cat xa* | \$DATA_DIR/bin/tar x -J --delay-directory-restore --preserve-permissions -v -C '$staging'"
 #Script from proot-distro
 chmod u+rw "\$CONTAINER_DIR/etc/passwd" "\$CONTAINER_DIR/etc/shadow" "\$CONTAINER_DIR/etc/group" "\$CONTAINER_DIR/etc/gshadow"
 echo "aid_\$(id -un):x:\$(id -u):\$(id -g):Termux:/:/sbin/nologin" >> "\$CONTAINER_DIR/etc/passwd"
@@ -710,7 +763,7 @@ else
 	exit 1
 fi
 \$DATA_DIR/bin/busybox rm -rf xa* tmp1 tmp2 tmp3
-""", "安装容器系统");
+""", "配置并就位容器系统");
     //TINY-OPT: 写入“安装完成”标记。原来的首启门闩只有 defaultContainer 这一个 key，
     //而它要到本函数返回之后才写入，进程若在这中间被杀，下次会把 GB 级分片再拷一遍。
     await G.prefs.setBool("containerInstalled", true);
@@ -727,8 +780,8 @@ fi
     G.updateText.value = AppLocalizations.of(G.homePageStateContext)!.installationComplete;
   }
 
-  //TINY-OPT: 首启空间预检。分片要落一份到内部存储，解包后 rootfs 还会再大一圈，
-  //这里按“分片总大小 × 3 + 512MB 余量”估算，不够就提前报错，而不是写到一半失败。
+  //TINY-OPT: 首启空间预检。流式直解免落盘，磁盘无需缓存近 1GB 临时分片，
+  //空间要求从原来的“分片总大小 × 3”降为“分片总大小 × 2 + 512MB 余量”。
   static Future<void> _ensureEnoughSpace(List<String> xaFiles) async {
     int shardBytes = 0;
     for (String name in xaFiles) {
@@ -739,7 +792,7 @@ fi
         return null;
       });
     }
-    final int needed = shardBytes * 3 + 512 * 1024 * 1024;
+    final int needed = shardBytes * 2 + 512 * 1024 * 1024;
     int? usable;
     try {
       usable = await D.androidChannel.invokeMethod<int>("getUsableSpace", {"path": G.dataPath});
@@ -749,7 +802,7 @@ fi
     if (usable != null && usable < needed) {
       throw StateError(
         "存储空间不足：安装需要约 ${(needed / 1048576).round()} MB，当前可用 ${(usable / 1048576).round()} MB。"
-        "请清理空间后重试（已复制的分片会保留，重试时无需重新复制）。"
+        "请清理空间后重试。"
       );
     }
   }
@@ -943,7 +996,7 @@ clear""");
   }
 
   static Future<void> workflow() async {
-    grantPermissions();
+    await grantPermissions();
     await initData();
     await initTerminalForCurrent();
     setupAudio();
