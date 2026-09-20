@@ -1,0 +1,188 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+if (flutterVersionCode == null) {
+    flutterVersionCode = '1'
+}
+
+def flutterVersionName = localProperties.getProperty('flutter.versionName')
+if (flutterVersionName == null) {
+    flutterVersionName = '1.0'
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace "com.example.tiny_computer"
+    compileSdkVersion flutter.compileSdkVersion
+    ndkVersion "27.0.12077973"  // flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = 17
+    }
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+        main.java.srcDirs += 'src/main/java'
+    }
+
+    defaultConfig {
+        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        applicationId "com.fct.tiny"
+        // You can update the following values to match your application needs.
+        // For more information, see: https://docs.flutter.dev/deployment/android#reviewing-the-gradle-build-configuration.
+        minSdk 28 // glob() version //proot version //ffmpeg_kit; flutter.minSdkVersion
+        targetSdk 28 //https://github.com/termux/termux-app/issues/1072; native; linker; flutter.targetSdkVersion
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+
+        buildConfigField "String", "COMMIT", "\"" + ("git rev-parse HEAD\n".execute().getText().trim() ?: (System.getenv('CURRENT_COMMIT') ?: "NO_COMMIT")) + "\""
+
+        externalNativeBuild {
+            cmake {
+                cppFlags "-std=c++11"
+                arguments "-DANDROID_STL=c++_shared"
+            }
+        }
+
+    }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
+
+    // 有没有可用的发布签名？
+    // 关键：Android 只按“签名证书相同”判断能否覆盖安装。
+    // CI 与本地必须使用同一个 keystore，否则每个版本都要卸载重装。
+    def hasReleaseSigning = keystorePropertiesFile.exists() &&
+            keystoreProperties['storeFile'] != null &&
+            file("${keystoreProperties['storeFile']}").exists() &&
+            keystoreProperties['storePassword'] != null &&
+            keystoreProperties['keyAlias'] != null
+
+    buildTypes {
+        release {
+            // 有正式密钥就用正式密钥；没有则退回 debug 签名，保证 CI/本地都能出包。
+            // ⚠️ debug 签名的包无法覆盖安装正式签名的包，仅适合临时测试。
+            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // 把签名状态打进 BuildConfig，App 内和 CI 日志里都能确认这次是不是正式签名
+            buildConfigField "boolean", "IS_RELEASE_SIGNED", "${hasReleaseSigning}"
+            buildConfigField "String", "APPLICATION_ID", "\"${applicationId}\""
+            buildConfigField "String", "VERSION_NAME", "\"${flutterVersionName}\""
+            buildConfigField "int", "VERSION_CODE", "${flutterVersionCode}"
+        }
+        debug {
+            signingConfig signingConfigs.debug
+            minifyEnabled true
+            shrinkResources false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    if (!hasReleaseSigning) {
+        logger.lifecycle("⚠️  未找到有效的发布签名（android/keystore.properties），本次 release 将使用 debug 签名。")
+        logger.lifecycle("   若要支持“直接覆盖安装更新”，请配置 KEYSTORE_BASE64 等 Secrets 或本地 keystore.properties。")
+    } else {
+        logger.lifecycle("✅ 使用发布签名：${keystoreProperties['storeFile']} (alias=${keystoreProperties['keyAlias']})")
+    }
+
+    buildFeatures {
+        aidl true
+        dataBinding true
+        viewBinding true
+        buildConfig true
+    }
+    
+
+    lint {
+        disable "NullSafeMutableLiveData"
+    }
+
+    lintOptions {
+        //checkReleaseBuilds false
+        abortOnError false
+    }
+    externalNativeBuild {
+        cmake {
+            path "src/main/cpp/CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    packagingOptions {
+        pickFirst 'lib/arm64-v8a/libc++_shared.so'
+        pickFirst 'lib/x86_64/libc++_shared.so'
+        pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+    }
+
+    // TINY-OPT (2026-09-20): 打包闸门。
+    // 仓库不跟踪 assets/xa*（rootfs 分片）、assets/patch.tar.gz、jniLibs、keystore.properties，
+    // 缺失时打出来的 APK 能装上但一启动就崩/黑屏。原本没有任何检查，
+    // 这里在 preBuild 阶段直接拦住。可用 -PskipBuildInputCheck=true 临时跳过。
+    def requiredRepoFiles = ["assets/assets.zip", "assets/patch.tar.gz"]
+    def jniDir = file("src/main/jniLibs/arm64-v8a")
+    tasks.register("verifyBuildInputs") {
+        doLast {
+            if (project.hasProperty("skipBuildInputCheck")) {
+                logger.lifecycle("verifyBuildInputs: 已通过 -PskipBuildInputCheck 跳过")
+                return
+            }
+            def missing = []
+            requiredRepoFiles.each { rel ->
+                if (!rootProject.file("../${rel}").exists()) { missing << rel }
+            }
+            def shards = rootProject.file("../assets")?.listFiles()?.findAll { it.name ==~ /xa[a-z]{1,2}/ } ?: []
+            if (shards.size() < 2) { missing << "assets/xa*（当前 ${shards.size()} 个分片）" }
+            def soCount = jniDir.exists() ? (jniDir.listFiles()?.length ?: 0) : 0
+            if (soCount == 0) { missing << "android/app/src/main/jniLibs/arm64-v8a/*（需从 Releases 下载 jniLibs.zip）" }
+            if (!missing.isEmpty()) {
+                throw new GradleException("构建输入不完整，已中止：\n  - " + missing.join("\n  - "))
+            }
+            logger.lifecycle("verifyBuildInputs: ${shards.size()} 个 rootfs 分片，${soCount} 个本地库，检查通过")
+        }
+    }
+    tasks.matching { it.name == "preBuild" }.configureEach {
+        dependsOn("verifyBuildInputs")
+    }
+}
+
+flutter {
+    source '../..'
+}
+
+dependencies {
+    implementation "androidx.core:core-ktx:1.15.0"
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "com.google.android.material:material:1.7.0"
+    implementation 'com.github.tiann:FreeReflection:3.2.2'
+}
