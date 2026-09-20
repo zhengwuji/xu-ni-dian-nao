@@ -27,9 +27,15 @@ class MainApplication : FlutterApplication() {
     companion object {
         // TINY-OPT: DocumentsProvider 是系统实例化的，拿不到 Application 引用，
         // 这里放一个静态 Context 供其做路径 containment 校验。
+        //
+        // ⚠️ @JvmStatic 是必需的：调用方是 Java（TinyDocumentsProvider.java）。
+        // 没有它时，Kotlin 的 companion 成员在 Java 侧要写成
+        // MainApplication.Companion.getAppContext()，直接 MainApplication.getAppContext()
+        // 会报 "cannot find symbol"。
         @Volatile
         private var appContext: Context? = null
 
+        @JvmStatic
         fun getAppContext(): Context {
             return appContext ?: throw IllegalStateException("Application is not created yet")
         }

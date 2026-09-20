@@ -97,7 +97,10 @@ public class TinyDocumentsProvider extends DocumentsProvider {
         return queryChildDocuments(parentDocumentId, projection, sortOrder, null);
     }
 
-    @Override
+    // 注意：这里刻意不写 @Override。
+    // DocumentsProvider 的 4 参重载（带 CancellationSignal）只在 API 26+ 的 SDK 里声明，
+    // 加了 @Override 会报 "method does not override or implement a method from a supertype"。
+    // 不加 @Override 时它仍然是同一个虚方法，系统照样会调到它（等价实现，行为不变）。
     public Cursor queryChildDocuments(String parentDocumentId, String[] projection, String sortOrder,
                                       CancellationSignal cancellationSignal) throws FileNotFoundException {
         final MatrixCursor result = new MatrixCursor(projection != null ? projection : DEFAULT_DOCUMENT_PROJECTION);
