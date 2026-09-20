@@ -180,12 +180,19 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "产物：" ; ls -lh artifacts
 
+      - name: 安装 Android 命令行工具（校验 APK 需要 apksigner / aapt2）
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'build-tools;34.0.0 platform-tools'
+          log-accepted-android-sdk-licenses: false
+
       - name: 校验 APK 签名 / 包名 / versionCode（保证可覆盖安装）
         id: verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          # CI 上 make 一份“上一版”用于对比：优先取本仓库最新 Release 里的同桌面 APK，
-          # 取不到就只打印本包信息（不阻断），但签名一致性仍会与预期指纹对比。
+          # 对比基准：本仓库上一个 Release 里的同桌面 APK
           OLD_APK=""
           if command -v gh >/dev/null 2>&1; then
             OLD_TAG=$(gh release list -R "$GITHUB_REPOSITORY" -L 20 --json tagName -q '.[].tagName' 2>/dev/null | head -1 || true)
@@ -194,16 +201,15 @@ jobs:
               gh release download "$OLD_TAG" -R "$GITHUB_REPOSITORY" \
                 -p "*${DESKTOP}*.apk" -D /tmp/old-apk --clobber 2>/dev/null || true
               OLD_APK=$(ls /tmp/old-apk/*.apk 2>/dev/null | head -1 || true)
-              echo "上一版：$OLD_TAG -> ${OLD_APK:-未取到}"
+              echo "上一版：$OLD_TAG -> ${OLD_APK:-未取到（首次发布属正常）}"
             fi
           fi
 
-          export ANDROID_HOME="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           if [ -n "$OLD_APK" ]; then
             bash .github/scripts/verify-apk.sh "${{ steps.collect.outputs.apk_path }}" "$OLD_APK"
           else
             bash .github/scripts/verify-apk.sh "${{ steps.collect.outputs.apk_path }}"
-            echo "（本次没有可对比的上一版，仅校验了本包签名）"
+            echo "（首次发布，没有可对比的上一版；已校验本包签名与包名）"
           fi
 
       - name: 上传构建产物
