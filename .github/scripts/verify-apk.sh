@@ -70,17 +70,17 @@ read_info() {
   #   Signer #1 certificate DN: CN=...
   #   Signer #1 certificate SHA-256 digest: abcd...
   #
-  # 注意：不要用 2>/dev/null 吞掉 stderr。build-tools 的 apksigner 在遇到
-  # minSdk 相关问题时只会往 stderr 报错，吞掉之后表现为"取不到签名"，很难排查。
+  # 注意：不要用 2>/dev/null 吞掉 stderr，否则出问题时只剩"取不到签名"。
   local certs rc
   set +e
   certs=$("$APKSIGNER_BIN" verify --print-certs "$apk" 2>&1)
   rc=$?
   set -e
-  if [ "$rc" -ne 0 ]; then
-    echo "警告：apksigner verify 返回 $rc，输出如下：" >&2
-    printf '%s\n' "$certs" >&2
-  fi
+
+  # 始终把原始输出打出来，便于排查不同 build-tools 版本的格式差异
+  echo "--- apksigner 原始输出 (rc=$rc) ---"
+  printf '%s\n' "$certs"
+  echo "--- 输出结束 ---"
 
   # 兼容不同的措辞（Signer #1... / Signer #1 certificate ...）
   dn=$(printf '%s' "$certs"  | sed -n 's/^Signer #1 certificate DN: //p'                         | head -1 || true)
