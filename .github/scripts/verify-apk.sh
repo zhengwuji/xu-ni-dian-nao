@@ -66,9 +66,10 @@ read_info() {
     name=$(printf '%s' "$badging" | grep -o "versionName='[^']*'" | head -1 | cut -d"'" -f2 || true)
   fi
 
-  # apksigner verify --print-certs 输出：
-  #   Signer #1 certificate DN: CN=...
-  #   Signer #1 certificate SHA-256 digest: abcd...
+  # apksigner verify --print-certs 的输出格式在不同 build-tools 版本间不一样：
+  #   build-tools <= 33:  "Signer #1 certificate DN: ..." / "Signer #1 certificate SHA-256 digest: ..."
+  #   build-tools 34+  :  "V2 Signer: certificate DN: ..." / "V2 Signer: certificate SHA-256 digest: ..."
+  # 所以这里不写死前缀，统一用正则抓 "certificate DN:" 与 "SHA-256 digest:"。
   #
   # 注意：不要用 2>/dev/null 吞掉 stderr，否则出问题时只剩"取不到签名"。
   local certs rc
@@ -77,21 +78,14 @@ read_info() {
   rc=$?
   set -e
 
-  # 始终把原始输出打出来，便于排查不同 build-tools 版本的格式差异
-  echo "--- apksigner 原始输出 (rc=$rc) ---"
-  printf '%s\n' "$certs"
-  echo "--- 输出结束 ---"
+  if [ "$rc" -ne 0 ]; then
+    echo "apksigner 返回 $rc，输出如下：" >&2
+    printf '%s\n' "$certs" >&2
+  fi
 
-  # 兼容不同的措辞（Signer #1... / Signer #1 certificate ...）
-  dn=$(printf '%s' "$certs"  | sed -n 's/^Signer #1 certificate DN: //p'                         | head -1 || true)
-  dig=$(printf '%s' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'              | head -1 || true)
-  # 兜底：某些版本把 digest 写成小写或带别的前缀
-  if [ -z "$dig" ]; then
-    dig=$(printf '%s' "$certs" | grep -i 'signer #1.*sha-256 digest:' | head -1 | sed 's/.*digest:[[:space:]]*//' | tr -d '\r' || true)
-  fi
-  if [ -z "$dn" ]; then
-    dn=$(printf '%s' "$certs" | grep -i 'signer #1.*certificate DN:' | head -1 | sed 's/.*DN:[[:space:]]*//' | tr -d '\r' || true)
-  fi
+  # 兼容两种前缀：取第一条 certificate DN / SHA-256 digest
+  dn=$(printf '%s\n' "$certs"  | grep -i 'certificate DN:'          | head -1 | sed 's/.*certificate DN:[[:space:]]*//'          | tr -d '\r' || true)
+  dig=$(printf '%s\n' "$certs" | grep -i 'certificate SHA-256 digest:' | head -1 | sed 's/.*SHA-256 digest:[[:space:]]*//' | tr -d '\r' || true)
 
   eval "${key}_PKG=\$pkg"
   eval "${key}_CODE=\$code"
@@ -120,8 +114,15 @@ fi
 if printf '%s' "$NEW_DN" | grep -qi 'CN=Android Debug'; then
   echo
   echo "⚠️  这是 debug 签名。debug 签名的包【无法】覆盖安装正式签名的包，"
-  echo "    不同机器产生的 debug 签名之间也互不兼容。请配置发布签名。"
+  echo "    不同机器产生的 debug 签名之间也互不兼容。"
   echo "signed=false" >> "${GITHUB_OUTPUT:-/dev/null}"
+  # 如果明明配置了 keystore 却打出 debug 签名，那是配置没生效，必须直接失败，
+  # 否则会静默发布一个用户装不上去的包。
+  if [ "${EXPECT_SIGNED:-false}" = "true" ]; then
+    echo "错误：配置了发布签名（EXPECT_SIGNED=true），但产物是 debug 签名。" >&2
+    echo "  请检查 android/keystore.properties 的 storeFile 是否正确、密码是否匹配。" >&2
+    exit 1
+  fi
 else
   echo "signed=true" >> "${GITHUB_OUTPUT:-/dev/null}"
 fi

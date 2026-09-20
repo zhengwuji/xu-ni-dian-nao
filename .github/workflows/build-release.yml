@@ -117,13 +117,22 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > keys/release.jks
           # 校验密钥可读，密码错时在这里就失败，而不是等到编译结束
           keytool -list -keystore keys/release.jks -storepass "$KEYSTORE_PASSWORD" -alias "${KEY_ALIAS:-upload}" >/dev/null
-          # 注意：storeFile 相对 android/app 目录，因此用 ../keys/release.jks
+
+          # ⚠️ storeFile 用绝对路径。
+          # build.gradle 里的 file(...) 是相对 android/app/ 解析的，
+          # 写相对路径很容易指错（例如 ../keys/release.jks 会解析到 android/keys/release.jks）。
+          KS_ABS="$(pwd)/keys/release.jks"
           cat > android/keystore.properties <<EOF
           storePassword=${KEYSTORE_PASSWORD}
           keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}
           keyAlias=${KEY_ALIAS:-upload}
-          storeFile=../keys/release.jks
+          storeFile=${KS_ABS}
           EOF
+
+          echo "keystore 路径：${KS_ABS}"
+          ls -l "$KS_ABS"
+          # 把 Gradle 关心的东西写成环境变量，编译后用它判断签名是否真的生效
+          echo "keystore_abs=${KS_ABS}" >> "$GITHUB_OUTPUT"
           echo "signed=true" >> "$GITHUB_OUTPUT"
           echo "已配置发布签名（alias=${KEY_ALIAS:-upload}），密钥内容不会打印"
 
@@ -149,7 +158,12 @@ jobs:
             --target-platform android-arm64 \
             --split-per-abi \
             --obfuscate \
-            --split-debug-info="build/symbols/$DESKTOP"
+            --split-debug-info="build/symbols/$DESKTOP" 2>&1 | tee /tmp/flutter-build.log
+
+          # 把 Gradle 关于签名的判断捞出来（配置阶段的日志默认不显示，
+          # 这里显式确认到底用了哪套签名配置）
+          echo "--- Gradle 签名相关输出 ---"
+          grep -aE '使用发布签名|未找到有效的发布签名' /tmp/flutter-build.log || echo "(未捕获到签名日志)"
 
       - name: 收集产物并计算校验和
         id: collect
@@ -190,6 +204,8 @@ jobs:
         id: verify
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 配置了 keystore 就必须打出正式签名，否则脚本直接失败
+          EXPECT_SIGNED: ${{ steps.signing.outputs.signed }}
         run: |
           set -euo pipefail
           # 对比基准：本仓库上一个 Release 里的同桌面 APK
