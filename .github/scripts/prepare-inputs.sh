@@ -43,11 +43,11 @@ split_rootfs() {
   done < <(find "$ASSETS_DIR" -maxdepth 1 -type f \( -name 'xa*' \) -printf '%f\n' 2>/dev/null)
   rm -f "$ASSETS_DIR/xa.sha256"
 
-  # ⚠️ 必须用 GNU split 的默认命名（xaa, xab, ... xaz）。
-  # 不要加 -d / --numeric-suffixes：那会生成 xa00, xa01…，
-  # 既不是 App 端期望的名字，也匹配不上 xa[a-z]，
-  # 会导致后面的 sha256sum 收到空参数、清单只剩一行空校验和。
-  split -b "${PART_SIZE}" "$src" "${ASSETS_DIR}/xa"
+  # ⚠️ split 的前缀只能写到 "x"。
+  # GNU split 会自己在前缀后面补两位后缀 aa, ab, ... az, ba, ...
+  #   前缀 assets/x   -> xaa, xab, ... xaz   ✅ App 端就是这个命名
+  #   前缀 assets/xa  -> xaaa, xaab, ...      ❌ 多了一个 a（CI 上就是这么挂的）
+  split -b "${PART_SIZE}" "$src" "${ASSETS_DIR}/x"
 
   local n
   n=$(shard_count)

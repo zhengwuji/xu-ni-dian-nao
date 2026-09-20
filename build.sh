@@ -79,8 +79,10 @@ for DESKTOP in "${DESKTOP_ENVS[@]}"; do
     done < <(find "$ASSETS_DIR" -maxdepth 1 -type f -name 'xa*' -printf '%f\n' 2>/dev/null)
     rm -f "$ASSETS_DIR/xa.sha256"
 
-    # 用 GNU split 的默认命名 xaa..xaz（不要 -d / --numeric-suffixes）
-    split -b "$PART_SIZE" "$SRC" "$ASSETS_DIR/xa"
+    # split 的前缀只能写到 "x"：GNU split 会自己补两位后缀 aa, ab, ... az
+    #   前缀 assets/x   -> xaa, xab, ... xaz   ✅
+    #   前缀 assets/xa  -> xaaa, xaab, ...      ❌ 多一个 a
+    split -b "$PART_SIZE" "$SRC" "$ASSETS_DIR/x"
     PART_COUNT=$(shard_count)
     log "共 $PART_COUNT 个分片: $(shard_list | tr '\n' ' ')"
     if [ "$PART_COUNT" -eq 0 ]; then
