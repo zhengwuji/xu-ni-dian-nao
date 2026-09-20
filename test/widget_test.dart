@@ -4,15 +4,41 @@
 // 那个控件，所以它永远失败。这里换成真正针对本仓库业务逻辑的测试——重点是那些
 // 曾经出过 bug、或者一旦改错就会静默损坏用户数据的地方。
 
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiny_computer/l10n/app_localizations.dart';
 import 'package:tiny_computer/workflow.dart';
 
 void main() {
+  // Util.validateBetween 通过 AppLocalizations.of(G.homePageStateContext) 取文案，
+  // 所以需要先把一个带 Localizations 的真实 BuildContext 塞进 G。
+  // 用 testWidgets 起一棵最小 widget 树来拿这个 context。
+  testWidgets('准备带本地化的 BuildContext', (WidgetTester tester) async {
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [Locale('zh'), Locale('en')],
+      home: Builder(
+        builder: (context) {
+          G.homePageStateContext = context;
+          return const SizedBox.shrink();
+        },
+      ),
+    ));
+    expect(G.homePageStateContext, isNotNull);
+  });
+
   group('Util.validateBetween', () {
     test('空值与非法输入应被拒绝', () {
       expect(Util.validateBetween(null, 0, 100, () {}), isNotNull);
       expect(Util.validateBetween('', 0, 100, () {}), isNotNull);
       expect(Util.validateBetween('abc', 0, 100, () {}), isNotNull);
+      // int.tryParse('1.5') == null，视为非法
       expect(Util.validateBetween('1.5', 0, 100, () {}), isNotNull);
     });
 
@@ -65,16 +91,16 @@ void main() {
     });
   });
 
-  group('脚本生成：分片命名约束', () {
+  group('分片命名约束', () {
     // App 端在容器安装脚本里用 `cat xa*` 拼接 rootfs 分片（lib/workflow.dart），
     // shell 的通配符按字典序展开，所以分片名必须满足“字典序 == 拆分顺序”。
     // 这里把这条约束固化成测试，避免以后有人改分片命名时踩坑。
     String splitName(int index) {
-      // 与 build.ps1 / build.sh 的命名规则保持一致：26 片以内是 xaa..xaz
+      // 与 build.ps1 / build.sh / prepare-inputs.sh 的规则一致：
+      // GNU split 默认前缀 + 两位字母后缀，26 片以内是 xaa..xaz
       if (index < 26) {
         return 'xa${String.fromCharCode(97 + index)}';
       }
-      // 超过 26 片走补零数字前缀（此时必须同步改 App 端拼接方式，脚本会直接报错）
       final n = index - 26;
       final hi = (n ~/ 26) + 1;
       final lo = n % 26;
@@ -92,6 +118,12 @@ void main() {
       final names = List.generate(26, splitName);
       final sorted = [...names]..sort();
       expect(sorted, equals(names));
+    });
+
+    test('分片名长度固定为 3（便于 shell glob 与正则统一匹配）', () {
+      for (var i = 0; i < 26; i++) {
+        expect(splitName(i).length, 3);
+      }
     });
   });
 }

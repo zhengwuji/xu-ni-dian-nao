@@ -69,10 +69,29 @@ read_info() {
   # apksigner verify --print-certs 输出：
   #   Signer #1 certificate DN: CN=...
   #   Signer #1 certificate SHA-256 digest: abcd...
-  local certs
-  certs=$("$APKSIGNER_BIN" verify --print-certs "$apk" 2>/dev/null || true)
-  dn=$(printf '%s' "$certs"     | sed -n 's/^Signer #1 certificate DN: //p' | head -1 || true)
-  dig=$(printf '%s' "$certs"    | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1 || true)
+  #
+  # 注意：不要用 2>/dev/null 吞掉 stderr。build-tools 的 apksigner 在遇到
+  # minSdk 相关问题时只会往 stderr 报错，吞掉之后表现为"取不到签名"，很难排查。
+  local certs rc
+  set +e
+  certs=$("$APKSIGNER_BIN" verify --print-certs "$apk" 2>&1)
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "警告：apksigner verify 返回 $rc，输出如下：" >&2
+    printf '%s\n' "$certs" >&2
+  fi
+
+  # 兼容不同的措辞（Signer #1... / Signer #1 certificate ...）
+  dn=$(printf '%s' "$certs"  | sed -n 's/^Signer #1 certificate DN: //p'                         | head -1 || true)
+  dig=$(printf '%s' "$certs" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p'              | head -1 || true)
+  # 兜底：某些版本把 digest 写成小写或带别的前缀
+  if [ -z "$dig" ]; then
+    dig=$(printf '%s' "$certs" | grep -i 'signer #1.*sha-256 digest:' | head -1 | sed 's/.*digest:[[:space:]]*//' | tr -d '\r' || true)
+  fi
+  if [ -z "$dn" ]; then
+    dn=$(printf '%s' "$certs" | grep -i 'signer #1.*certificate DN:' | head -1 | sed 's/.*DN:[[:space:]]*//' | tr -d '\r' || true)
+  fi
 
   eval "${key}_PKG=\$pkg"
   eval "${key}_CODE=\$code"
