@@ -699,7 +699,7 @@ cat tmp3 | while read -r group_name group_id; do
 		echo "aid_\${group_name}:*::root,aid_\$(id -un)" >> "\$CONTAINER_DIR/etc/gshadow"
 	fi
 done
-${Localizations.localeOf(G.homePageStateContext).languageCode == 'zh' ? "" : "if [ -f \"\\$CONTAINER_DIR/usr/local/etc/tmoe-linux/locale.txt\" ]; then echo 'LANG=en_US.UTF-8' > \\$CONTAINER_DIR/usr/local/etc/tmoe-linux/locale.txt; fi"}
+${Localizations.localeOf(G.homePageStateContext).languageCode == 'zh' ? "" : "if [ -f \"\\\$CONTAINER_DIR/usr/local/etc/tmoe-linux/locale.txt\" ]; then echo 'LANG=en_US.UTF-8' > \\\$CONTAINER_DIR/usr/local/etc/tmoe-linux/locale.txt; fi"}
 #原子替换：先把旧的挪走，再把 staging 改名到位；搬运失败则回滚。
 rm -rf "\$DATA_DIR/containers/0.old"
 if [ -d "\$DATA_DIR/containers/0" ]; then mv "\$DATA_DIR/containers/0" "\$DATA_DIR/containers/0.old"; fi
