@@ -830,8 +830,8 @@ fi
       final s = WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
       final String w = (max(s.width, s.height) * 0.75).round().toString();
       final String h = (min(s.width, s.height) * 0.75).round().toString();
-      G.postCommand = """sed -i -E "s@(geometry)=.*@\\1=${w}x${h}@" /etc/tigervnc/vncserver-config-tmoe
-sed -i -E "s@^(VNC_RESOLUTION)=.*@\\1=${w}x${h}@" \$(command -v startvnc)""";
+      G.postCommand = """sed -i -E "s@(geometry)=.*@\\1=${w}x$h@" /etc/tigervnc/vncserver-config-tmoe
+sed -i -E "s@^(VNC_RESOLUTION)=.*@\\1=${w}x$h@" \$(command -v startvnc)""";
       if (Localizations.localeOf(G.homePageStateContext).languageCode != 'zh') {
         G.postCommand += "\nlocaledef -c -i en_US -f UTF-8 en_US.UTF-8";
         // For English users, assume they need to enable terminal write

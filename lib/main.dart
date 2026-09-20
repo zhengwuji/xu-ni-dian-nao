@@ -395,11 +395,11 @@ class _SettingPageState extends State<SettingPage> {
                     Navigator.of(context).pop();
                   }, child: Text(AppLocalizations.of(context)!.cancel)),
                   TextButton(onPressed:() async {
-                    Util.termWrite("""sed -i -E "s@(geometry)=.*@\\1=${w}x${h}@" /etc/tigervnc/vncserver-config-tmoe
-sed -i -E "s@^(VNC_RESOLUTION)=.*@\\1=${w}x${h}@" \$(command -v startvnc)""");
+                    Util.termWrite("""sed -i -E "s@(geometry)=.*@\\1=${w}x$h@" /etc/tigervnc/vncserver-config-tmoe
+sed -i -E "s@^(VNC_RESOLUTION)=.*@\\1=${w}x$h@" \$(command -v startvnc)""");
                     ScaffoldMessenger.of(context).hideCurrentSnackBar();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text("${w}x${h}. ${AppLocalizations.of(context)!.applyOnNextLaunch}"))
+                      SnackBar(content: Text("${w}x$h. ${AppLocalizations.of(context)!.applyOnNextLaunch}"))
                     );
                     if (!context.mounted) return;
                     Navigator.of(context).pop();
