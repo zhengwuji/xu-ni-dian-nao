@@ -125,7 +125,6 @@ ${CHANGES}
 | --- | --- |
 | \`${APK_NAME}\` | 主程序（arm64-v8a，${SIZE}） |
 | \`${APK_NAME}.sha256\` | APK 校验和 |
-| \`symbols-*.tar.gz\` | 混淆符号表，用于符号化线上崩溃 |
 
 - **SHA-256**：\`${SHA}\`
 - 构建号：\`${BUILD}\`

@@ -186,9 +186,7 @@ jobs:
             --build-name="${{ steps.ver.outputs.version_name }}" \
             --build-number="${{ steps.ver.outputs.version_code }}" \
             --target-platform android-arm64 \
-            --split-per-abi \
-            --obfuscate \
-            --split-debug-info="build/symbols/$DESKTOP" 2>&1 | tee /tmp/flutter-build.log
+            --split-per-abi 2>&1 | tee /tmp/flutter-build.log
 
           # 把 Gradle 关于签名的判断捞出来（配置阶段的日志默认不显示，
           # 这里显式确认到底用了哪套签名配置）
@@ -206,11 +204,8 @@ jobs:
           APK_SRC="build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
           APK_NAME="tiny-computer-${DESKTOP}-${NAME}.apk"
           cp "$APK_SRC" "artifacts/$APK_NAME"
-          # 符号表一起归档，方便对混淆后的线上崩溃做符号化
-          SYMBOLS_NAME="symbols-${DESKTOP}-${NAME}.tar.gz"
-          tar -czf "artifacts/$SYMBOLS_NAME" -C build/symbols "$DESKTOP"
           # 校验和
-          ( cd artifacts && sha256sum "$APK_NAME" "$SYMBOLS_NAME" > SHA256SUMS )
+          ( cd artifacts && sha256sum "$APK_NAME" > SHA256SUMS )
           # 顺手保留兼容旧习惯的单文件 sha
           ( cd artifacts && sha256sum "$APK_NAME" > "$APK_NAME.sha256" )
           {
@@ -218,7 +213,6 @@ jobs:
             echo "build_number=$BUILD"
             echo "apk_name=$APK_NAME"
             echo "apk_path=artifacts/$APK_NAME"
-            echo "symbols_name=$SYMBOLS_NAME"
             echo "sha256=$(sha256sum "artifacts/$APK_NAME" | cut -d' ' -f1)"
             echo "size_mb=$(( $(stat -c%s "artifacts/$APK_NAME") / 1048576 ))"
           } >> "$GITHUB_OUTPUT"

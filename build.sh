@@ -113,14 +113,10 @@ for DESKTOP in "${DESKTOP_ENVS[@]}"; do
 
   check_inputs
 
-  SDI="$SYMBOLS_ROOT/$DESKTOP"
-  mkdir -p "$SDI"
-  log "flutter build apk（符号表 -> $SDI）"
+  log "flutter build apk"
   flutter build apk \
     --target-platform android-arm64 \
-    --split-per-abi \
-    --obfuscate \
-    --split-debug-info="$SDI"
+    --split-per-abi
 
   APK_SRC="build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
   [ -f "$APK_SRC" ] || { echo "错误：找不到 APK $APK_SRC" >&2; exit 1; }

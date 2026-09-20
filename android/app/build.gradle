@@ -92,9 +92,8 @@ android {
             // 有正式密钥就用正式密钥；没有则退回 debug 签名，保证 CI/本地都能出包。
             // ⚠️ debug 签名的包无法覆盖安装正式签名的包，仅适合临时测试。
             signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled false
+            shrinkResources false
             // 把签名状态打进 BuildConfig，App 内和 CI 日志里都能确认这次是不是正式签名。
             // 注意：applicationId 必须通过 defaultConfig 引用 —— 在 buildTypes 作用域里
             // 直接写 "${applicationId}" 会报 "Could not get unknown property
@@ -121,7 +120,7 @@ android {
 
     buildFeatures {
         aidl false
-        dataBinding false
+        dataBinding true
         viewBinding true
         buildConfig true
     }

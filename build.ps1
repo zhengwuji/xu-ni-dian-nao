@@ -213,12 +213,8 @@ foreach ($DesktopEnv in $DesktopEnvs) {
 
     Assert-BuildInputs
 
-    # 每套桌面环境独立符号目录，避免互相覆盖
-    $Sdi = Join-Path $SymbolsDir $DesktopEnv
-    if (-not (Test-Path $Sdi)) { New-Item -ItemType Directory -Path $Sdi -Force | Out-Null }
-
     Write-Host "正在运行Flutter构建..."
-    flutter build apk --target-platform android-arm64 --split-per-abi --obfuscate --split-debug-info=$Sdi
+    flutter build apk --target-platform android-arm64 --split-per-abi
 
     if ($LASTEXITCODE -ne 0) {
         throw "Flutter 构建失败（$DesktopEnv），退出码 $LASTEXITCODE"

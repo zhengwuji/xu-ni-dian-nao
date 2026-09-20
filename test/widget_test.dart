@@ -11,10 +11,7 @@ import 'package:tiny_computer/l10n/app_localizations.dart';
 import 'package:tiny_computer/workflow.dart';
 
 void main() {
-  // Util.validateBetween 通过 AppLocalizations.of(G.homePageStateContext) 取文案，
-  // 所以需要先把一个带 Localizations 的真实 BuildContext 塞进 G。
-  // 用 testWidgets 起一棵最小 widget 树来拿这个 context。
-  testWidgets('准备带本地化的 BuildContext', (WidgetTester tester) async {
+  testWidgets('Util.validateBetween 输入合法性与范围校验', (WidgetTester tester) async {
     await tester.pumpWidget(MaterialApp(
       localizationsDelegates: const [
         AppLocalizations.delegate,
@@ -31,30 +28,25 @@ void main() {
       ),
     ));
     expect(G.homePageStateContext, isNotNull);
-  });
 
-  group('Util.validateBetween', () {
-    test('空值与非法输入应被拒绝', () {
-      expect(Util.validateBetween(null, 0, 100, () {}), isNotNull);
-      expect(Util.validateBetween('', 0, 100, () {}), isNotNull);
-      expect(Util.validateBetween('abc', 0, 100, () {}), isNotNull);
-      // int.tryParse('1.5') == null，视为非法
-      expect(Util.validateBetween('1.5', 0, 100, () {}), isNotNull);
-    });
+    // 空值与非法输入应被拒绝
+    expect(Util.validateBetween(null, 0, 100, () {}), isNotNull);
+    expect(Util.validateBetween('', 0, 100, () {}), isNotNull);
+    expect(Util.validateBetween('abc', 0, 100, () {}), isNotNull);
+    // int.tryParse('1.5') == null，视为非法
+    expect(Util.validateBetween('1.5', 0, 100, () {}), isNotNull);
 
-    test('越界值应被拒绝', () {
-      expect(Util.validateBetween('-1', 0, 100, () {}), isNotNull);
-      expect(Util.validateBetween('101', 0, 100, () {}), isNotNull);
-    });
+    // 越界值应被拒绝
+    expect(Util.validateBetween('-1', 0, 100, () {}), isNotNull);
+    expect(Util.validateBetween('101', 0, 100, () {}), isNotNull);
 
-    test('合法值应被接受并回调', () {
-      var called = false;
-      expect(Util.validateBetween('50', 0, 100, () => called = true), isNull);
-      expect(called, isTrue);
-      // 边界值
-      expect(Util.validateBetween('0', 0, 100, () {}), isNull);
-      expect(Util.validateBetween('100', 0, 100, () {}), isNull);
-    });
+    // 合法值应被接受并回调
+    var called = false;
+    expect(Util.validateBetween('50', 0, 100, () => called = true), isNull);
+    expect(called, isTrue);
+    // 边界值
+    expect(Util.validateBetween('0', 0, 100, () {}), isNull);
+    expect(Util.validateBetween('100', 0, 100, () {}), isNull);
   });
 
   group('默认值表 D', () {
